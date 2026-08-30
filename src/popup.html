@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FB Cookie Manager</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div><h1>FB Cookie Manager</h1><p id="domain">Detecting Facebook tab…</p></div>
+      <span id="status" class="badge">READY</span>
+    </header>
+    <section class="toolbar">
+      <input id="search" placeholder="Search cookies…" autocomplete="off">
+      <button id="refresh">Refresh</button>
+    </section>
+    <section class="import-box">
+      <label for="cookieInput">Paste cookie header</label>
+      <textarea id="cookieInput" spellcheck="false" placeholder="name=value; name2=value2"></textarea>
+      <div class="row"><button id="apply" class="primary">Apply Cookies</button><button id="clearInput">Clear</button></div>
+    </section>
+    <section class="table-wrap">
+      <table><thead><tr><th>Name</th><th>Domain</th><th>Value</th><th>Action</th></tr></thead><tbody id="rows"></tbody></table>
+    </section>
+    <footer><button id="export">Export JSON</button><button id="reload">Reload Tab</button></footer>
+    <div id="toast" class="toast"></div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
