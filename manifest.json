@@ -1,16 +1,22 @@
 {
   "manifest_version": 3,
   "name": "FB Cookie Manager",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Local Chrome extension for importing and managing cookies on facebook.com.",
-  "permissions": ["cookies", "tabs", "storage"],
-  "host_permissions": ["https://facebook.com/*", "https://*.facebook.com/*"],
+  "permissions": [
+    "cookies",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://facebook.com/*",
+    "https://*.facebook.com/*"
+  ],
   "action": {
     "default_title": "FB Cookie Manager",
     "default_popup": "src/popup.html"
   },
   "background": {
     "service_worker": "src/background.js"
-  },
-  "icons": {}
+  }
 }
