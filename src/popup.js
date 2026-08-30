@@ -25,38 +25,14 @@ function maskValue(value) {
   return `${value.slice(0, 5)}••••${value.slice(-5)}`;
 }
 
-function escapeText(value) {
-  return String(value ?? '');
-}
-
 function parseHeader(input) {
-  const result = [];
-  let current = '';
-  let quote = null;
-
-  for (const ch of input) {
-    if ((ch === '"' || ch === "'") && (quote === null || quote === ch)) {
-      quote = quote === null ? ch : null;
-      current += ch;
-    } else if (ch === ';' && quote === null) {
-      if (current.trim()) result.push(current.trim());
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  if (current.trim()) result.push(current.trim());
-
-  return result.map((part) => {
-    const index = part.indexOf('=');
-    if (index <= 0) return null;
-    const name = part.slice(0, index).trim();
-    let value = part.slice(index + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    if (!name) return null;
-    return { name, value };
+  const parts = input.split(';');
+  return parts.map((part) => {
+    const i = part.indexOf('=');
+    if (i <= 0) return null;
+    const name = part.slice(0, i).trim();
+    const value = part.slice(i + 1).trim();
+    return name ? { name, value } : null;
   }).filter(Boolean);
 }
 
@@ -75,8 +51,7 @@ function parseJson(input) {
       secure: c.secure,
       httpOnly: c.httpOnly,
       sameSite: c.sameSite,
-      expirationDate: Number.isFinite(c.expirationDate) ? c.expirationDate : undefined,
-      hostOnly: c.hostOnly
+      expirationDate: Number.isFinite(c.expirationDate) ? c.expirationDate : undefined
     };
   });
 }
@@ -84,19 +59,27 @@ function parseJson(input) {
 function detectFormat(input) {
   const trimmed = input.trim();
   if (!trimmed) return 'empty';
-  if (trimmed.startsWith('[') || trimmed.startsWith('{')) return 'json';
-  return 'header';
+  return trimmed.startsWith('[') || trimmed.startsWith('{') ? 'json' : 'header';
+}
+
+function isFacebook(hostname) {
+  const h = hostname.toLowerCase();
+  return h === 'facebook.com' || h.endsWith('.facebook.com');
 }
 
 function getTargetCookieDomain(hostname) {
-  const host = hostname.toLowerCase();
-  if (host === 'facebook.com' || host.endsWith('.facebook.com')) return '.facebook.com';
-  return host;
+  return isFacebook(hostname) ? '.facebook.com' : hostname.toLowerCase();
 }
 
 async function getTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs[0] || null;
+}
+
+async function resolveStore(tab) {
+  const stores = await chrome.cookies.getAllCookieStores();
+  const store = stores.find((s) => s.tabIds.includes(tab.id));
+  return store?.id || stores.find((s) => !s.incognito)?.id || stores[0]?.id || null;
 }
 
 function cookieUrl(cookie) {
@@ -105,69 +88,51 @@ function cookieUrl(cookie) {
   return `${scheme}://${domain}${cookie.path || '/'}`;
 }
 
-function formatExpiry(cookie) {
-  if (!cookie.expirationDate) return 'Session';
-  const date = new Date(cookie.expirationDate * 1000);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString();
-}
-
 function render() {
   const q = $('#search').value.trim().toLowerCase();
   const rows = $('#rows');
   rows.textContent = '';
 
-  const filtered = allCookies.filter((c) =>
-    `${c.name} ${c.domain} ${c.path}`.toLowerCase().includes(q)
-  );
-
+  const filtered = allCookies.filter((c) => `${c.name} ${c.domain} ${c.path}`.toLowerCase().includes(q));
   $('#count').textContent = `${filtered.length} cookie${filtered.length === 1 ? '' : 's'}`;
+  $('#empty').hidden = filtered.length !== 0;
 
   for (const cookie of filtered) {
     const tr = document.createElement('tr');
-
-    const addCell = (text, cls = '') => {
+    const cell = (text, cls = '') => {
       const td = document.createElement('td');
       td.className = cls;
-      td.textContent = escapeText(text);
+      td.textContent = String(text ?? '');
       tr.appendChild(td);
       return td;
     };
 
-    addCell(cookie.name, 'name');
-    addCell(cookie.domain, 'domain');
+    cell(cookie.name, 'name');
+    cell(cookie.domain, 'domain');
 
-    const valueCell = document.createElement('td');
-    valueCell.className = 'value-cell';
-    const value = document.createElement('code');
-    value.textContent = visibleValues.has(cookie.name + cookie.domain + cookie.path) ? cookie.value : maskValue(cookie.value);
-    value.title = 'Click to reveal/hide';
-    value.onclick = () => {
-      const key = cookie.name + cookie.domain + cookie.path;
+    const valueCell = cell('', 'value-cell');
+    const code = document.createElement('code');
+    const key = `${cookie.name}|${cookie.domain}|${cookie.path}`;
+    code.textContent = visibleValues.has(key) ? cookie.value : maskValue(cookie.value);
+    code.title = 'Click to reveal/hide';
+    code.onclick = () => {
       if (visibleValues.has(key)) visibleValues.delete(key); else visibleValues.add(key);
       render();
     };
-    valueCell.appendChild(value);
-    tr.appendChild(valueCell);
+    valueCell.appendChild(code);
 
-    const actionCell = document.createElement('td');
-    actionCell.className = 'actions';
-
+    const actions = cell('', 'actions');
     const copy = document.createElement('button');
     copy.textContent = 'Copy';
     copy.onclick = async () => {
       await navigator.clipboard.writeText(cookie.value);
       toast('Cookie value copied', 'success');
     };
-
     const del = document.createElement('button');
     del.textContent = 'Delete';
     del.className = 'danger';
     del.onclick = () => deleteCookie(cookie);
-
-    actionCell.append(copy, del);
-    tr.appendChild(actionCell);
-    rows.appendChild(tr);
+    actions.append(copy, del);
   }
 }
 
@@ -177,14 +142,13 @@ async function load() {
     if (!activeTab?.url || !/^https?:\/\//i.test(activeTab.url)) {
       allCookies = [];
       $('#domain').textContent = 'Open facebook.com in the active tab';
-      $('#count').textContent = '0 cookies';
       render();
       setStatus('NO TAB', 'warn');
       return;
     }
 
     const url = new URL(activeTab.url);
-    if (!(url.hostname === 'facebook.com' || url.hostname.endsWith('.facebook.com'))) {
+    if (!isFacebook(url.hostname)) {
       allCookies = [];
       $('#domain').textContent = `${url.hostname} — unsupported domain`;
       render();
@@ -192,11 +156,9 @@ async function load() {
       return;
     }
 
-    selectedStoreId = activeTab.incognito ? 'incognito' : '0';
+    selectedStoreId = await resolveStore(activeTab);
     $('#domain').textContent = `${url.hostname}${activeTab.incognito ? ' • INCOGNITO' : ''}`;
-
-    const query = { url: url.origin + '/', storeId: selectedStoreId };
-    allCookies = await chrome.cookies.getAll(query);
+    allCookies = await chrome.cookies.getAll({ url: url.origin + '/', storeId: selectedStoreId || undefined });
     render();
     setStatus('READY', 'ready');
   } catch (error) {
@@ -209,11 +171,12 @@ async function load() {
 
 async function deleteCookie(cookie) {
   try {
-    await chrome.cookies.remove({
+    const removed = await chrome.cookies.remove({
       url: cookieUrl(cookie),
       name: cookie.name,
       storeId: cookie.storeId || selectedStoreId || undefined
     });
+    if (!removed) throw new Error('Chrome did not remove the cookie');
     toast(`Deleted ${cookie.name}`, 'success');
     await load();
   } catch (error) {
@@ -223,30 +186,19 @@ async function deleteCookie(cookie) {
 
 async function applyCookies() {
   try {
-    if (!activeTab?.url || !/^https?:\/\//i.test(activeTab.url)) {
-      throw new Error('Open facebook.com in the active tab first');
-    }
-
+    if (!activeTab?.url || !/^https?:\/\//i.test(activeTab.url)) throw new Error('Open facebook.com in the active tab first');
     const url = new URL(activeTab.url);
-    if (!(url.hostname === 'facebook.com' || url.hostname.endsWith('.facebook.com'))) {
-      throw new Error('Open facebook.com in the active tab first');
-    }
+    if (!isFacebook(url.hostname)) throw new Error('Open facebook.com in the active tab first');
 
     const input = $('#cookieInput').value.trim();
     if (!input) throw new Error('Paste cookies first');
 
     const format = detectFormat(input);
-    let list;
-    if (format === 'json') {
-      list = parseJson(input);
-    } else {
-      list = parseHeader(input);
-    }
+    const list = format === 'json' ? parseJson(input) : parseHeader(input);
     if (!list.length) throw new Error('No valid cookies found');
 
     setStatus('APPLYING…', 'loading');
     $('#apply').disabled = true;
-
     const defaultDomain = getTargetCookieDomain(url.hostname);
     const results = [];
 
@@ -268,10 +220,11 @@ async function applyCookies() {
           if (item.expirationDate && item.expirationDate > Date.now() / 1000) details.expirationDate = item.expirationDate;
         } else {
           details.domain = defaultDomain;
+          details.secure = true;
         }
 
         const created = await chrome.cookies.set(details);
-        if (!created) throw new Error('Chrome did not return a cookie object');
+        if (!created) throw new Error('Chrome rejected the cookie');
         results.push({ name: item.name, ok: true });
       } catch (error) {
         results.push({ name: item.name, ok: false, error: error?.message || 'Set failed' });
@@ -287,13 +240,8 @@ async function applyCookies() {
       ? failed.map((r) => `${r.name}: ${r.error}`).join('\n')
       : 'All requested cookies were accepted by Chrome.';
 
-    if (failed.length) {
-      setStatus('PARTIAL', 'warn');
-      toast(`${ok} applied, ${failed.length} failed`, 'warn');
-    } else {
-      setStatus('APPLIED', 'ready');
-      toast(`${ok} cookie${ok === 1 ? '' : 's'} applied`, 'success');
-    }
+    setStatus(failed.length ? 'PARTIAL' : 'APPLIED', failed.length ? 'warn' : 'ready');
+    toast(`${ok} applied${failed.length ? `, ${failed.length} failed` : ''}`, failed.length ? 'warn' : 'success');
   } catch (error) {
     setStatus('ERROR', 'error');
     toast(error?.message || 'Import failed', 'error');
@@ -316,21 +264,14 @@ function exportJson() {
 async function clearDomain() {
   if (!allCookies.length) return toast('No cookies to clear', 'warn');
   if (!window.confirm('Clear all cookies for this Facebook domain?')) return;
-
   setStatus('CLEARING…', 'loading');
   let ok = 0;
   let fail = 0;
-  for (const cookie of allCookies) {
+  for (const cookie of [...allCookies]) {
     try {
-      const removed = await chrome.cookies.remove({
-        url: cookieUrl(cookie),
-        name: cookie.name,
-        storeId: cookie.storeId || selectedStoreId || undefined
-      });
+      const removed = await chrome.cookies.remove({ url: cookieUrl(cookie), name: cookie.name, storeId: cookie.storeId || selectedStoreId || undefined });
       if (removed) ok++; else fail++;
-    } catch (_) {
-      fail++;
-    }
+    } catch (_) { fail++; }
   }
   await load();
   toast(`${ok} deleted${fail ? `, ${fail} failed` : ''}`, fail ? 'warn' : 'success');
@@ -339,12 +280,8 @@ async function clearDomain() {
 $('#search').addEventListener('input', render);
 $('#refresh').addEventListener('click', load);
 $('#apply').addEventListener('click', applyCookies);
-$('#clearInput').addEventListener('click', () => {
-  $('#cookieInput').value = '';
-  $('#result').hidden = true;
-});
+$('#clearInput').addEventListener('click', () => { $('#cookieInput').value = ''; $('#result').hidden = true; });
 $('#export').addEventListener('click', exportJson);
 $('#clearAll').addEventListener('click', clearDomain);
 $('#reload').addEventListener('click', () => activeTab && chrome.tabs.reload(activeTab.id));
-
 load();
