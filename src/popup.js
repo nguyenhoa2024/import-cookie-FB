@@ -56,6 +56,23 @@ function parseJson(input) {
   });
 }
 
+function extractPipeCookies(input) {
+  if (!input.includes('|')) return input;
+  const parts = input.split('|');
+  if (parts.length < 2) return input;
+  let best = '';
+  let bestCount = 0;
+  for (const part of parts) {
+    const trimmed = part.trim();
+    const count = trimmed.split(';').filter((p) => p.includes('=')).length;
+    if (count > bestCount) {
+      bestCount = count;
+      best = trimmed;
+    }
+  }
+  return bestCount >= 2 ? best : input;
+}
+
 function detectFormat(input) {
   const trimmed = input.trim();
   if (!trimmed) return 'empty';
@@ -190,8 +207,9 @@ async function applyCookies() {
     const url = new URL(activeTab.url);
     if (!isFacebook(url.hostname)) throw new Error('Open facebook.com in the active tab first');
 
-    const input = $('#cookieInput').value.trim();
-    if (!input) throw new Error('Paste cookies first');
+    const raw = $('#cookieInput').value.trim();
+    if (!raw) throw new Error('Paste cookies first');
+    const input = extractPipeCookies(raw);
 
     const format = detectFormat(input);
     const list = format === 'json' ? parseJson(input) : parseHeader(input);
