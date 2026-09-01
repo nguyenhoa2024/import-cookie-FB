@@ -260,6 +260,10 @@ async function applyCookies() {
 
     setStatus(failed.length ? 'PARTIAL' : 'APPLIED', failed.length ? 'warn' : 'ready');
     toast(`${ok} applied${failed.length ? `, ${failed.length} failed` : ''}`, failed.length ? 'warn' : 'success');
+
+    if (ok > 0 && activeTab?.id) {
+      setTimeout(() => chrome.tabs.reload(activeTab.id), 1500);
+    }
   } catch (error) {
     setStatus('ERROR', 'error');
     toast(error?.message || 'Import failed', 'error');
